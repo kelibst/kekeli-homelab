@@ -183,6 +183,62 @@ curl -sSL https://raw.githubusercontent.com/kelibst/kekeli-homelab/windows/insta
 iwr -useb https://raw.githubusercontent.com/kelibst/kekeli-homelab/windows/install.ps1 | iex
 ```
 
+## 🎨 Enhanced Interactive Experience
+
+Our installers now feature a rich, interactive experience with:
+
+### Visual Features
+- **📊 Real-time Progress Bars**: Track installation progress with visual indicators
+- **🎯 Interactive Menus**: Choose options with arrow keys or numbered selections
+- **🌈 Color-coded Output**: Clear status messages (✅ success, ⚠️ warnings, ❌ errors)
+- **✨ Animated Banners**: Engaging welcome screens and success celebrations
+- **⏱️ Time Estimates**: Know how long each step will take
+
+### Installation Profiles
+Choose your installation experience:
+
+1. **Express** (5 minutes) - Recommended for most users
+   - Automatic configuration with smart defaults
+   - Standard installation paths
+   - Mobile support auto-enabled
+
+2. **Custom** (10-15 minutes) - For experienced users
+   - Choose specific components
+   - Custom installation paths
+   - Advanced configuration options
+
+3. **Developer** (15-20 minutes) - Full feature set
+   - All components and tools
+   - Debug features enabled
+   - Verbose logging
+   - API documentation
+
+### Interactive Installers
+
+#### Enhanced Windows Installer
+```powershell
+# Interactive installation with rich UI
+.\install-interactive.ps1
+
+# Specify profile directly
+.\install-interactive.ps1 -Profile Express
+```
+
+#### Enhanced Linux Installer
+```bash
+# Interactive installation with dialog support
+./install-interactive.sh
+
+# Specify profile directly
+./install-interactive.sh --profile Express
+```
+
+#### Python Rich UI Installer
+```bash
+# Beautiful terminal UI with animations
+python3 install-rich.py
+```
+
 ## 🆘 Troubleshooting
 
 ### Common Issues

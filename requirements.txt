@@ -1,0 +1,14 @@
+# Kekeli-HomeCloud Python Dependencies
+# For enhanced interactive installation experience
+
+# Core dependencies
+rich>=13.0.0        # Rich terminal UI for beautiful output
+click>=8.0.0        # Command line interface creation
+tqdm>=4.65.0        # Progress bars
+colorama>=0.4.0     # Cross-platform colored terminal text
+questionary>=2.0.0  # Interactive prompts and menus
+
+# Optional but recommended
+pyyaml>=6.0         # YAML configuration support
+requests>=2.28.0    # HTTP requests for downloads
+psutil>=5.9.0       # System and process utilities
