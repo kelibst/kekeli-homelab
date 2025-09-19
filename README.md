@@ -18,7 +18,7 @@ One-click Nextcloud installer that makes home cloud storage as easy as downloadi
 ### For Linux/WSL2 Users
 ```bash
 # Clone and run
-git clone <repository-url>
+git clone -b windows https://github.com/kelibst/kekeli-homelab
 cd kekeli-homelab
 python3 install.py
 ```
@@ -26,7 +26,7 @@ python3 install.py
 ### For Windows Users
 ```powershell
 # Clone and run (as Administrator)
-git clone <repository-url>
+git clone -b windows https://github.com/kelibst/kekeli-homelab
 cd kekeli-homelab
 python install.py
 ```
@@ -175,12 +175,12 @@ python install.py --platform
 
 ### Linux/WSL2
 ```bash
-curl -sSL https://raw.githubusercontent.com/your-repo/kekeli-homelab/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/kelibst/kekeli-homelab/windows/install.sh | bash
 ```
 
 ### Windows (PowerShell as Administrator)
 ```powershell
-iwr -useb https://raw.githubusercontent.com/your-repo/kekeli-homelab/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/kelibst/kekeli-homelab/windows/install.ps1 | iex
 ```
 
 ## 🆘 Troubleshooting
