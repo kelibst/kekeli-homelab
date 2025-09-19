@@ -17,21 +17,21 @@ One-click Nextcloud installer that makes home cloud storage as easy as downloadi
 
 ### For Linux/WSL2 Users
 ```bash
-# Clone and run
+# Interactive installation (recommended)
 git clone -b windows https://github.com/kelibst/kekeli-homelab
 cd kekeli-homelab
-python3 install.py
+./install.sh
 ```
 
 ### For Windows Users
 ```powershell
-# Clone and run (as Administrator)
+# Interactive installation (as Administrator)
 git clone -b windows https://github.com/kelibst/kekeli-homelab
 cd kekeli-homelab
-python install.py
+.\install.ps1
 ```
 
-The installer automatically detects your platform and uses the appropriate installation method!
+The installer now features an **interactive experience** with progress bars, animated menus, and visual feedback! Choose from Express, Custom, or Developer profiles.
 
 ## 📋 System Requirements
 
@@ -213,30 +213,31 @@ Choose your installation experience:
    - Verbose logging
    - API documentation
 
-### Interactive Installers
+### Installation Options
 
-#### Enhanced Windows Installer
+#### Main Interactive Installers (Default)
 ```powershell
-# Interactive installation with rich UI
-.\install-interactive.ps1
+# Windows - Enhanced interactive experience
+.\install.ps1
 
-# Specify profile directly
-.\install-interactive.ps1 -Profile Express
+# Linux/WSL2 - Enhanced interactive experience
+./install.sh
 ```
 
-#### Enhanced Linux Installer
+#### Alternative Rich UI Installer
 ```bash
-# Interactive installation with dialog support
-./install-interactive.sh
-
-# Specify profile directly
-./install-interactive.sh --profile Express
-```
-
-#### Python Rich UI Installer
-```bash
-# Beautiful terminal UI with animations
+# Python-based with Rich terminal library
 python3 install-rich.py
+```
+
+#### Simple Non-Interactive Installers
+For automated/scripted installations:
+```powershell
+# Windows - Simple version (backup)
+.\install-simple.ps1
+
+# Linux/WSL2 - Simple version (backup)
+./install-simple.sh
 ```
 
 ## 🆘 Troubleshooting
@@ -308,3 +309,24 @@ Open source project aimed at democratizing home cloud storage.
 **Made with ❤️ by the Kekeli-HomeCloud Team**
 
 *Transform your computer into your personal cloud - no technical degree required!*
+
+---
+
+## 🎉 New Interactive Features
+
+### What's Changed
+The main `install.ps1` and `install.sh` scripts are now **fully interactive** with enhanced user experience:
+
+- **📊 Visual Progress Tracking**: See exactly what's happening with real-time progress bars
+- **🎯 Interactive Profile Selection**: Choose Express, Custom, or Developer profiles with rich menus
+- **✨ Animated Interface**: Beautiful banners, spinners, and success celebrations
+- **🔍 Smart Requirements Check**: Visual system validation with helpful error messages
+- **⏱️ Time Estimates**: Know how long each installation step will take
+- **🌈 Color-Coded Output**: Clear status indicators (✅ success, ⚠️ warnings, ❌ errors)
+
+### Backup Files
+The original simple installers are preserved as:
+- `install-simple.ps1` - Windows non-interactive version
+- `install-simple.sh` - Linux non-interactive version
+
+These are perfect for automated installations or CI/CD pipelines where interactivity isn't desired.
