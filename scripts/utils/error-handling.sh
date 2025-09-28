@@ -295,6 +295,120 @@ safe_execute() {
     return "$return_code"
 }
 
+# Function to execute commands with real-time progress display (no timeout)
+execute_with_progress() {
+    local command="$1"
+    local operation_name="$2"
+    local critical=${3:-true}
+    local allow_interruption=${4:-true}
+
+    set_operation "$operation_name"
+    log_with_context "INFO" "Executing with progress: $command"
+
+    local return_code
+    local interrupted=false
+
+    # Set up signal handlers for graceful interruption
+    local original_sigint_handler=$(trap -p INT)
+    local original_sigterm_handler=$(trap -p TERM)
+
+    if [ "$allow_interruption" = true ]; then
+        trap 'interrupted=true; echo ""; print_status "warn" "Operation interrupted by user"' INT TERM
+    fi
+
+    # Execute command with real-time output
+    print_status "progress" "Starting: $operation_name"
+    echo ""  # Add space for better readability
+
+    # Execute command directly, showing all output in real-time
+    bash -c "$command"
+    return_code=$?
+
+    echo ""  # Add space after command output
+
+    # Restore original signal handlers
+    if [ -n "$original_sigint_handler" ]; then
+        eval "$original_sigint_handler"
+    else
+        trap - INT
+    fi
+
+    if [ -n "$original_sigterm_handler" ]; then
+        eval "$original_sigterm_handler"
+    else
+        trap - TERM
+    fi
+
+    # Handle interruption
+    if [ "$interrupted" = true ]; then
+        complete_operation "interrupted"
+        log_with_context "WARNING" "Command interrupted by user: $command"
+
+        if [ "$critical" = true ]; then
+            print_status "question" "Operation was interrupted. What would you like to do?"
+            echo "  1) Continue anyway (skip this step)"
+            echo "  2) Retry the operation"
+            echo "  3) Abort installation"
+            echo ""
+            read -p "Enter your choice (1-3): " choice
+            case "$choice" in
+                1)
+                    print_status "warn" "Continuing with installation..."
+                    return 0
+                    ;;
+                2)
+                    print_status "info" "Retrying operation..."
+                    execute_with_progress "$command" "$operation_name" "$critical" "$allow_interruption"
+                    return $?
+                    ;;
+                3|*)
+                    handle_critical_error "Installation aborted by user" $ERROR_USER_ABORT false
+                    ;;
+            esac
+        else
+            handle_recoverable_error "Operation interrupted: $operation_name"
+            return 130  # Standard exit code for SIGINT
+        fi
+    fi
+
+    # Handle result
+    if [ "$return_code" -eq 0 ]; then
+        complete_operation "success"
+        log_with_context "INFO" "Command succeeded: $command"
+        print_status "pass" "$operation_name completed successfully"
+    else
+        complete_operation "failed"
+        log_with_context "ERROR" "Command failed with exit code $return_code: $command"
+
+        if [ "$critical" = true ]; then
+            print_status "question" "Operation failed. What would you like to do?"
+            echo "  1) Continue anyway (skip this step)"
+            echo "  2) Retry the operation"
+            echo "  3) Abort installation"
+            echo ""
+            read -p "Enter your choice (1-3): " choice
+            case "$choice" in
+                1)
+                    print_status "warn" "Continuing despite failure..."
+                    return 0
+                    ;;
+                2)
+                    print_status "info" "Retrying operation..."
+                    execute_with_progress "$command" "$operation_name" "$critical" "$allow_interruption"
+                    return $?
+                    ;;
+                3|*)
+                    handle_critical_error "$operation_name failed" "$return_code"
+                    ;;
+            esac
+        else
+            handle_recoverable_error "$operation_name failed"
+        fi
+    fi
+
+    return "$return_code"
+}
+
 # =============================================================================
 # ERROR RECOVERY FUNCTIONS
 # =============================================================================

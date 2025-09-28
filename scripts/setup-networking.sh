@@ -25,27 +25,41 @@ readonly REQUIRED_PORTS="80,443,8080,8443"
 detect_and_validate_network() {
     print_subsection "Detecting Network Environment"
 
+    print_status "progress" "Starting network environment analysis..."
+    print_status "info" "This will check connectivity and identify network interfaces"
+
     # Test basic connectivity
+    print_status "progress" "Testing network connectivity and accessibility..."
     if ! test_network_connectivity; then
+        print_status "warn" "Network connectivity issues detected"
         handle_recoverable_error "Network connectivity issues detected"
         if ! ask_yes_no "Continue despite network issues?"; then
+            print_status "info" "User chose to abort due to network issues"
             return 1
         fi
+        print_status "progress" "Continuing with limited network connectivity..."
+    else
+        print_status "pass" "Network connectivity tests passed"
     fi
 
     # Detect all available IP addresses
+    print_status "progress" "Scanning for available network interfaces and IP addresses..."
     local access_ips
     access_ips=$(detect_access_ips)
 
     if [ -z "$access_ips" ]; then
+        print_status "error" "No network interfaces detected - network setup cannot proceed"
         handle_critical_error "No network interfaces detected"
         return 1
     fi
 
     print_status "pass" "Network environment detected successfully"
+    print_status "info" "Found network interfaces and IP addresses for Nextcloud access"
 
     # Save detected IPs for later use
+    print_status "progress" "Saving network configuration for later use..."
     save_config "DETECTED_ACCESS_IPS" "$access_ips"
+    print_status "pass" "Network detection completed"
 
     return 0
 }
@@ -59,36 +73,47 @@ setup_network_configuration() {
     echo ""
 
     print_status "progress" "Starting network configuration setup"
+    print_status "info" "This process will configure network access, ports, and mobile connectivity"
 
     # Step 1: Detect and validate network environment
-    if ! detect_and_validate_network(); then
+    print_status "progress" "Step 1/5: Detecting and validating network environment..."
+    if ! detect_and_validate_network; then
         print_status "fail" "Network detection failed"
         return 1
     fi
+    print_status "pass" "Step 1/5: Network environment detection completed successfully"
 
     # Step 2: Configure ports and firewall
-    if ! configure_firewall_and_ports(); then
+    print_status "progress" "Step 2/5: Configuring firewall and network ports..."
+    if ! configure_firewall_and_ports; then
         print_status "fail" "Firewall configuration failed"
         return 1
     fi
+    print_status "pass" "Step 2/5: Firewall and port configuration completed successfully"
 
     # Step 3: Generate network configuration
-    if ! generate_network_configuration(); then
+    print_status "progress" "Step 3/5: Generating network configuration files..."
+    if ! generate_network_configuration; then
         print_status "fail" "Network configuration generation failed"
         return 1
     fi
+    print_status "pass" "Step 3/5: Network configuration generation completed successfully"
 
     # Step 4: Set up mobile access
-    if ! setup_mobile_network_access(); then
+    print_status "progress" "Step 4/5: Setting up mobile device network access..."
+    if ! setup_mobile_network_access; then
         print_status "fail" "Mobile network access setup failed"
         return 1
     fi
+    print_status "pass" "Step 4/5: Mobile network access setup completed successfully"
 
     # Step 5: Validate configuration
-    if ! validate_network_setup(); then
+    print_status "progress" "Step 5/5: Validating complete network configuration..."
+    if ! validate_network_setup; then
         print_status "fail" "Network configuration validation failed"
         return 1
     fi
+    print_status "pass" "Step 5/5: Network configuration validation completed successfully"
 
     print_status "pass" "Network configuration completed successfully"
     return 0
@@ -98,32 +123,46 @@ setup_network_configuration() {
 configure_firewall_and_ports() {
     print_subsection "Configuring Firewall and Ports"
 
+    print_status "progress" "Analyzing network port availability..."
+    print_status "info" "Checking for available ports for Nextcloud services"
+
     # Check if required ports are available
+    print_status "progress" "Scanning ports 8080-8090 for availability..."
     local available_ports
     available_ports=$(scan_available_ports 8080 8090)
 
     local nextcloud_port=$DEFAULT_NEXTCLOUD_PORT
     local nextcloud_ssl_port=$DEFAULT_NEXTCLOUD_SSL_PORT
 
+    print_status "info" "Default Nextcloud port: $DEFAULT_NEXTCLOUD_PORT"
+    print_status "info" "Default Nextcloud SSL port: $DEFAULT_NEXTCLOUD_SSL_PORT"
+
     # Select available port if default is in use
+    print_status "progress" "Checking if default port $DEFAULT_NEXTCLOUD_PORT is available..."
     if netstat -tln 2>/dev/null | grep -q ":$DEFAULT_NEXTCLOUD_PORT "; then
         print_status "warn" "Default port $DEFAULT_NEXTCLOUD_PORT is in use"
+        print_status "progress" "Searching for alternative available port..."
 
         # Find first available port
         while IFS= read -r port; do
             if [ "$port" -ge 8080 ] && [ "$port" -le 8090 ]; then
                 nextcloud_port=$port
                 nextcloud_ssl_port=$((port + 363))  # 8080 -> 8443, 8081 -> 8444, etc.
+                print_status "pass" "Found available port: $nextcloud_port"
                 break
             fi
         done <<< "$available_ports"
 
-        print_status "info" "Using alternative port: $nextcloud_port"
+        print_status "info" "Using alternative port: $nextcloud_port (SSL: $nextcloud_ssl_port)"
+    else
+        print_status "pass" "Default port $DEFAULT_NEXTCLOUD_PORT is available"
     fi
 
     # Save port configuration
+    print_status "progress" "Saving port configuration..."
     save_config "NEXTCLOUD_HTTP_PORT" "$nextcloud_port"
     save_config "NEXTCLOUD_HTTPS_PORT" "$nextcloud_ssl_port"
+    print_status "pass" "Port configuration saved"
 
     # Configure firewall
     local ports_to_open="$nextcloud_port,$nextcloud_ssl_port"
@@ -540,6 +579,9 @@ show_help() {
 
 # Main function
 main() {
+    # Immediate feedback to user
+    print_status "progress" "Starting network configuration..."
+
     local setup_mode=false
     local test_mode=false
     local validate_mode=false
@@ -618,11 +660,15 @@ main() {
 
     # Default: Run setup
     if [ "$setup_mode" = true ] || [ $# -eq 0 ]; then
+        print_status "info" "Running network configuration setup mode"
+        print_status "progress" "Initializing network configuration process..."
         if setup_network_configuration; then
             echo ""
+            print_status "progress" "Generating network configuration summary..."
             show_network_status
             echo ""
             print_status "pass" "Network configuration completed successfully!"
+            print_status "info" "Network ready for Nextcloud deployment"
             echo -e "${CYAN}Next step: Deploy Nextcloud containers${NC}"
             exit 0
         else

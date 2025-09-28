@@ -383,10 +383,15 @@ deploy_containers() {
     print_status "progress" "Stopping existing containers..."
     docker compose down 2>/dev/null || true
 
-    # Pull latest images
-    print_status "progress" "Pulling container images..."
-    if ! safe_execute "docker compose pull" "Pull container images"; then
-        print_status "warn" "Some images failed to pull, continuing with existing images"
+    # Pull latest images with real-time progress
+    print_status "info" "Downloading container images (this may take a while on slow connections)..."
+    print_status "info" "Images to download: Nextcloud, PostgreSQL, and Redis"
+    print_status "info" "You can press Ctrl+C to interrupt and choose how to proceed"
+    echo ""
+
+    if ! execute_with_progress "docker compose pull" "Download container images" false; then
+        print_status "warn" "Some images failed to download, attempting to continue with existing images"
+        print_status "info" "If containers fail to start, you may need to retry the installation"
     fi
 
     # Start containers

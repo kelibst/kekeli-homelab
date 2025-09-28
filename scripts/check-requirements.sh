@@ -2,13 +2,19 @@
 # check-requirements.sh - Validate system requirements for Kekeli-HomeCloud installer
 # Part of the Kekeli-HomeCloud Easy Installer Project
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+# Source common utilities if available
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/utils/common.sh" ]]; then
+    source "$SCRIPT_DIR/utils/common.sh"
+else
+    # Fallback colors if common.sh not available
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m' # No Color
+fi
 
 # Requirements
 MIN_DISK_SPACE_GB=4
@@ -16,14 +22,23 @@ RECOMMENDED_DISK_SPACE_GB=10
 MIN_MEMORY_MB=2048
 RECOMMENDED_MEMORY_MB=4096
 
-# Exit codes
-SUCCESS=0
-ERROR_OS_NOT_SUPPORTED=1
-ERROR_INSUFFICIENT_DISK=2
-ERROR_INSUFFICIENT_MEMORY=3
-ERROR_NO_NETWORK=4
-ERROR_NO_SUDO=5
-ERROR_DOCKER_UNAVAILABLE=6
+# Exit codes - use common.sh definitions (or define locally if not available)
+if [[ -z "${SUCCESS:-}" ]]; then
+    # Not using common.sh, define our own
+    SUCCESS=0
+    ERROR_OS_NOT_SUPPORTED=2
+    ERROR_INSUFFICIENT_DISK=3
+    ERROR_INSUFFICIENT_MEMORY=3
+    ERROR_NO_NETWORK=4
+    ERROR_NO_SUDO=5
+    ERROR_DOCKER_UNAVAILABLE=6
+else
+    # Using common.sh, map to its definitions
+    ERROR_INSUFFICIENT_DISK=$ERROR_INSUFFICIENT_RESOURCES
+    ERROR_INSUFFICIENT_MEMORY=$ERROR_INSUFFICIENT_RESOURCES
+    ERROR_NO_NETWORK=$ERROR_NETWORK_UNAVAILABLE
+    ERROR_NO_SUDO=$ERROR_PERMISSION_DENIED
+fi
 
 echo -e "${BLUE}🔍 Kekeli-HomeCloud Requirements Checker${NC}"
 echo -e "${BLUE}======================================${NC}"
@@ -155,12 +170,13 @@ check_memory() {
 check_network() {
     echo -e "${YELLOW}🌐 Checking Network Connectivity...${NC}"
 
-    # Check internet connectivity
-    if ping -c 1 -W 5 8.8.8.8 >/dev/null 2>&1; then
+    # Check internet connectivity (warning only - not required for local-only setup)
+    if ping -c 1 -W 5 8.8.8.8 >/dev/null 2>&1 || ping -c 1 -W 5 1.1.1.1 >/dev/null 2>&1; then
         print_status "pass" "Internet connectivity: Available"
     else
-        print_status "fail" "No internet connectivity (required for Docker installation)"
-        return $ERROR_NO_NETWORK
+        print_status "warn" "No internet connectivity detected"
+        print_status "info" "  Note: Internet is only needed for initial Docker image downloads"
+        print_status "info" "  You can continue with local-only setup or connect to internet later"
     fi
 
     # Check local network interfaces
@@ -184,14 +200,24 @@ check_sudo() {
     if sudo -n true 2>/dev/null; then
         print_status "pass" "Sudo privileges: Available (passwordless)"
         return 0
-    elif sudo -l >/dev/null 2>&1; then
+    elif groups "$USER" | grep -q sudo; then
+        print_status "pass" "Sudo privileges: Available (in sudo group)"
+        return 0
+    elif timeout 1 sudo -l >/dev/null 2>&1; then
         print_status "pass" "Sudo privileges: Available (password required)"
         return 0
     else
-        print_status "fail" "No sudo privileges (required for system configuration)"
-        echo -e "${RED}    Run: sudo usermod -aG sudo \$USER${NC}"
-        echo -e "${RED}    Then log out and back in${NC}"
-        return $ERROR_NO_SUDO
+        # One more test - try a simple sudo command with a short timeout
+        echo "[sudo] password for $(whoami): " >&2
+        if timeout 30 sudo true 2>/dev/null; then
+            print_status "pass" "Sudo privileges: Available (password required)"
+            return 0
+        else
+            print_status "fail" "No sudo privileges (required for system configuration)"
+            echo -e "${RED}    Run: sudo usermod -aG sudo \$USER${NC}"
+            echo -e "${RED}    Then log out and back in${NC}"
+            return $ERROR_NO_SUDO
+        fi
     fi
 }
 
@@ -354,10 +380,6 @@ main() {
             $ERROR_INSUFFICIENT_MEMORY)
                 echo -e "  • Close unnecessary applications"
                 echo -e "  • Add more RAM to your system"
-                ;;
-            $ERROR_NO_NETWORK)
-                echo -e "  • Check your internet connection"
-                echo -e "  • Verify network configuration"
                 ;;
             $ERROR_NO_SUDO)
                 echo -e "  • Contact your system administrator"

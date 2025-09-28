@@ -2,29 +2,35 @@
 # common.sh - Common utility functions for Kekeli-HomeCloud installer
 # Part of the Kekeli-HomeCloud Easy Installer Project
 
-# Colors for output
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly CYAN='\033[0;36m'
-readonly MAGENTA='\033[0;35m'
-readonly NC='\033[0m' # No Color
+# Colors for output (only define if not already defined)
+if [[ -z "${RED:-}" ]]; then
+    readonly RED='\033[0;31m'
+    readonly GREEN='\033[0;32m'
+    readonly YELLOW='\033[1;33m'
+    readonly BLUE='\033[0;34m'
+    readonly CYAN='\033[0;36m'
+    readonly MAGENTA='\033[0;35m'
+    readonly NC='\033[0m' # No Color
+fi
 
-# Common exit codes
-readonly SUCCESS=0
-readonly ERROR_GENERAL=1
-readonly ERROR_OS_NOT_SUPPORTED=2
-readonly ERROR_INSUFFICIENT_RESOURCES=3
-readonly ERROR_NETWORK_UNAVAILABLE=4
-readonly ERROR_PERMISSION_DENIED=5
-readonly ERROR_DOCKER_UNAVAILABLE=6
-readonly ERROR_USER_ABORT=7
+# Common exit codes (only define if not already defined)
+if [[ -z "${SUCCESS:-}" ]]; then
+    readonly SUCCESS=0
+    readonly ERROR_GENERAL=1
+    readonly ERROR_OS_NOT_SUPPORTED=2
+    readonly ERROR_INSUFFICIENT_RESOURCES=3
+    readonly ERROR_NETWORK_UNAVAILABLE=4
+    readonly ERROR_PERMISSION_DENIED=5
+    readonly ERROR_DOCKER_UNAVAILABLE=6
+    readonly ERROR_USER_ABORT=7
+fi
 
-# Global configuration
-readonly KEKELI_CONFIG_DIR="$HOME/.kekeli-homecloud"
-readonly KEKELI_LOG_FILE="$KEKELI_CONFIG_DIR/install.log"
-readonly KEKELI_CONFIG_FILE="$KEKELI_CONFIG_DIR/config.env"
+# Global configuration (only define if not already defined)
+if [[ -z "${KEKELI_CONFIG_DIR:-}" ]]; then
+    readonly KEKELI_CONFIG_DIR="$HOME/.kekeli-homecloud"
+    readonly KEKELI_LOG_FILE="$KEKELI_CONFIG_DIR/install.log"
+    readonly KEKELI_CONFIG_FILE="$KEKELI_CONFIG_DIR/config.env"
+fi
 
 # Ensure config directory exists
 mkdir -p "$KEKELI_CONFIG_DIR" 2>/dev/null
@@ -130,6 +136,18 @@ get_user_input() {
     local default=$2
     local validator=$3
     local value
+
+    # Check if running in non-interactive mode
+    if [ ! -t 0 ] || [ "${KEKELI_NON_INTERACTIVE:-false}" = "true" ]; then
+        if [ -n "$default" ]; then
+            log_info "Non-interactive mode: Using default value for '$prompt': $default"
+            echo "$default"
+            return 0
+        else
+            log_error "Non-interactive mode: No default value for required input '$prompt'"
+            return 1
+        fi
+    fi
 
     while true; do
         if [ -n "$default" ]; then
@@ -520,9 +538,9 @@ handle_interrupt() {
     exit $ERROR_USER_ABORT
 }
 
-# Set up signal handlers
-trap cleanup_on_exit EXIT
-trap handle_interrupt INT TERM
+# Signal handlers are available but not auto-enabled
+# Individual scripts can call: trap cleanup_on_exit EXIT
+# Individual scripts can call: trap handle_interrupt INT TERM
 
 # =============================================================================
 # CONFIGURATION FUNCTIONS
@@ -537,9 +555,9 @@ save_config() {
     touch "$KEKELI_CONFIG_FILE" 2>/dev/null
 
     # Remove existing key if present
-    if [ -f "$KEKELI_CONFIG_FILE" ]; then
-        grep -v "^$key=" "$KEKELI_CONFIG_FILE" > "${KEKELI_CONFIG_FILE}.tmp" 2>/dev/null
-        mv "${KEKELI_CONFIG_FILE}.tmp" "$KEKELI_CONFIG_FILE" 2>/dev/null
+    if [ -f "$KEKELI_CONFIG_FILE" ] && [ -s "$KEKELI_CONFIG_FILE" ]; then
+        grep -v "^$key=" "$KEKELI_CONFIG_FILE" > "${KEKELI_CONFIG_FILE}.tmp" 2>/dev/null || true
+        mv "${KEKELI_CONFIG_FILE}.tmp" "$KEKELI_CONFIG_FILE" 2>/dev/null || true
     fi
 
     # Add new key-value pair
@@ -615,6 +633,43 @@ wait_for_user() {
 # Function to check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# =============================================================================
+# MAIN INSTALLER FUNCTIONS
+# =============================================================================
+
+# Function to setup logging for main installer
+setup_logging() {
+    local debug_mode=${1:-false}
+
+    # Ensure log directory exists
+    mkdir -p "$KEKELI_CONFIG_DIR" 2>/dev/null
+
+    # Create or clear log file
+    echo "# Kekeli-HomeCloud Installation Log" > "$KEKELI_LOG_FILE"
+    echo "# Started: $(date)" >> "$KEKELI_LOG_FILE"
+    echo "" >> "$KEKELI_LOG_FILE"
+
+    if [ "$debug_mode" = true ]; then
+        log_message "SETUP" "Debug mode enabled"
+    fi
+
+    log_message "SETUP" "Logging initialized - $KEKELI_LOG_FILE"
+}
+
+# Function for main installer info logging
+log_info() {
+    local message=$1
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] [INFO] $message" >> "$KEKELI_LOG_FILE" 2>/dev/null
+}
+
+# Function for main installer error logging
+log_error() {
+    local message=$1
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] [ERROR] $message" >> "$KEKELI_LOG_FILE" 2>/dev/null
 }
 
 # =============================================================================
