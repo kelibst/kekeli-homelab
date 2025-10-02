@@ -42,43 +42,178 @@ deploy_nextcloud() {
 
     set_operation "Nextcloud Deployment"
 
-    # Step 1: Validate prerequisites
+    # Step 1: Validate .env file
+    if ! validate_env_file; then
+        complete_operation "failed"
+        return 1
+    fi
+
+    # Step 2: Validate prerequisites
     if ! validate_deployment_prerequisites; then
         complete_operation "failed"
         return 1
     fi
 
-    # Step 2: Generate deployment configuration
+    # Step 3: Generate deployment configuration
     if ! generate_deployment_configuration; then
         complete_operation "failed"
         return 1
     fi
 
-    # Step 3: Create deployment files
+    # Step 4: Create deployment files
     if ! create_deployment_files; then
         complete_operation "failed"
         return 1
     fi
 
-    # Step 4: Deploy containers
+    # Step 5: Deploy containers
     if ! deploy_containers; then
         complete_operation "failed"
         return 1
     fi
 
-    # Step 5: Configure Nextcloud
+    # Step 6: Configure Nextcloud
     if ! configure_nextcloud_post_deploy; then
         complete_operation "failed"
         return 1
     fi
 
-    # Step 6: Validate deployment
+    # Step 7: Validate deployment
     if ! validate_deployment; then
         complete_operation "failed"
         return 1
     fi
 
     complete_operation "success"
+    return 0
+}
+
+# Function to validate .env file exists and has required variables
+validate_env_file() {
+    print_subsection "Validating Environment Configuration"
+
+    local env_file="$PWD/.env"
+    local env_example="$PWD/.env.example"
+
+    # Check if .env file exists
+    if [ ! -f "$env_file" ]; then
+        print_status "fail" ".env file not found"
+
+        if [ -f "$env_example" ]; then
+            print_status "info" "Creating .env file from .env.example template"
+            if cp "$env_example" "$env_file"; then
+                print_status "pass" ".env file created from template"
+                print_status "warn" "Please review and customize the .env file before proceeding"
+                echo ""
+                echo -e "${YELLOW}IMPORTANT: Review these settings in .env:${NC}"
+                echo -e "  ${CYAN}PRIMARY_DOMAIN${NC} - Set to your desired IP address"
+                echo -e "  ${CYAN}ADMIN_PASSWORD${NC} - Change from default placeholder"
+                echo -e "  ${CYAN}NEXTCLOUD_HTTP_PORT${NC} - Verify port is available"
+                echo ""
+                if ask_yes_no "Would you like to edit the .env file now?"; then
+                    ${EDITOR:-nano} "$env_file"
+                fi
+            else
+                print_status "fail" "Failed to create .env file from template"
+                return 1
+            fi
+        else
+            print_status "fail" ".env.example template not found"
+            print_status "info" "Please create a .env file with required configuration"
+            return 1
+        fi
+    else
+        print_status "pass" ".env file found"
+    fi
+
+    # Required variables for secure deployment
+    local required_vars=(
+        "NEXTCLOUD_HTTP_PORT"
+        "POSTGRES_DB"
+        "POSTGRES_USER"
+        "POSTGRES_PASSWORD"
+        "REDIS_PASSWORD"
+        "NEXTCLOUD_VERSION"
+        "ADMIN_USER"
+        "ADMIN_PASSWORD"
+    )
+
+    local missing_vars=()
+    local placeholder_vars=()
+
+    # Check each required variable
+    for var in "${required_vars[@]}"; do
+        if ! grep -q "^${var}=" "$env_file" 2>/dev/null; then
+            missing_vars+=("$var")
+        else
+            local value=$(grep "^${var}=" "$env_file" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+            if [ -z "$value" ] || [[ "$value" =~ ^(CHANGE_THIS|your-secure-password|PLACEHOLDER) ]]; then
+                placeholder_vars+=("$var")
+            fi
+        fi
+    done
+
+    # Report missing variables
+    if [ ${#missing_vars[@]} -gt 0 ]; then
+        print_status "fail" "Missing required variables in .env file:"
+        for var in "${missing_vars[@]}"; do
+            echo -e "  ${RED}✗${NC} $var"
+        done
+        return 1
+    fi
+
+    # Report placeholder values that need to be changed
+    if [ ${#placeholder_vars[@]} -gt 0 ]; then
+        print_status "warn" "The following variables need to be customized:"
+        for var in "${placeholder_vars[@]}"; do
+            echo -e "  ${YELLOW}⚠${NC} $var (still has placeholder value)"
+        done
+
+        if [[ " ${placeholder_vars[@]} " =~ " ADMIN_PASSWORD " ]] || [[ " ${placeholder_vars[@]} " =~ " POSTGRES_PASSWORD " ]] || [[ " ${placeholder_vars[@]} " =~ " REDIS_PASSWORD " ]]; then
+            print_status "info" "Generating secure passwords for security variables..."
+
+            # Generate secure passwords for security-critical variables
+            if [[ " ${placeholder_vars[@]} " =~ " ADMIN_PASSWORD " ]]; then
+                local admin_pass=$(generate_random_string 16)
+                sed -i "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=$admin_pass/" "$env_file"
+                print_status "pass" "Generated secure admin password"
+            fi
+
+            if [[ " ${placeholder_vars[@]} " =~ " POSTGRES_PASSWORD " ]]; then
+                local postgres_pass=$(generate_random_string 24)
+                sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$postgres_pass/" "$env_file"
+                print_status "pass" "Generated secure database password"
+            fi
+
+            if [[ " ${placeholder_vars[@]} " =~ " REDIS_PASSWORD " ]]; then
+                local redis_pass=$(generate_random_string 24)
+                sed -i "s/^REDIS_PASSWORD=.*/REDIS_PASSWORD=$redis_pass/" "$env_file"
+                print_status "pass" "Generated secure Redis password"
+            fi
+        fi
+    fi
+
+    # Validate specific settings
+    local port=$(grep "^NEXTCLOUD_HTTP_PORT=" "$env_file" | cut -d'=' -f2)
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        print_status "fail" "Invalid NEXTCLOUD_HTTP_PORT in .env file: $port"
+        return 1
+    fi
+
+    print_status "pass" "Environment configuration validated"
+    print_status "info" "Using configuration from: $env_file"
+
+    # Show key settings (without sensitive passwords)
+    local admin_user=$(grep "^ADMIN_USER=" "$env_file" | cut -d'=' -f2)
+    local nextcloud_port=$(grep "^NEXTCLOUD_HTTP_PORT=" "$env_file" | cut -d'=' -f2)
+    local primary_domain=$(grep "^PRIMARY_DOMAIN=" "$env_file" | cut -d'=' -f2)
+
+    echo ""
+    echo -e "${CYAN}Key Configuration:${NC}"
+    echo -e "  Admin User: ${GREEN}$admin_user${NC}"
+    echo -e "  HTTP Port: ${GREEN}$nextcloud_port${NC}"
+    echo -e "  Primary Domain: ${GREEN}${primary_domain:-"(auto-detected)"}${NC}"
+
     return 0
 }
 
@@ -120,6 +255,30 @@ validate_deployment_prerequisites() {
         validation_passed=false
     else
         print_status "pass" "Network configuration found: port $nextcloud_port"
+    fi
+
+    # Check for IP address changes
+    if [ -f "$UTILS_DIR/network-detection.sh" ]; then
+        source "$UTILS_DIR/network-detection.sh"
+        local current_ip=$(get_primary_ip 2>/dev/null)
+        local configured_domain=$(load_config "PRIMARY_DOMAIN")
+
+        if [ -n "$current_ip" ] && [ -n "$configured_domain" ]; then
+            # Extract IP from domain (remove port if present)
+            local configured_ip=$(echo "$configured_domain" | cut -d':' -f1)
+
+            if [ "$current_ip" != "$configured_ip" ]; then
+                print_status "warn" "IP address change detected: $configured_ip -> $current_ip"
+                echo -e "${YELLOW}  Configured: $configured_domain${NC}"
+                echo -e "${YELLOW}  Current IP: $current_ip${NC}"
+                if ask_yes_no "Update configuration for new IP address?"; then
+                    print_status "info" "Run './scripts/setup-networking.sh --update-ip' to update configuration"
+                    validation_passed=false
+                fi
+            else
+                print_status "pass" "IP address configuration is current"
+            fi
+        fi
     fi
 
     # Check port availability
@@ -253,50 +412,17 @@ create_docker_compose_file() {
     local template_content
     template_content=$(cat "$template_file")
 
-    # Load configuration values
-    local nextcloud_version=$(load_config "NEXTCLOUD_VERSION")
-    local nextcloud_port=$(load_config "NEXTCLOUD_HTTP_PORT")
-    local postgres_db=$(load_config "POSTGRES_DB")
-    local postgres_user=$(load_config "POSTGRES_USER")
-    local postgres_password=$(load_config "POSTGRES_PASSWORD")
-    local redis_password=$(load_config "REDIS_PASSWORD")
-    local admin_user=$(load_config "ADMIN_USER")
-    local admin_password=$(load_config "ADMIN_PASSWORD")
-    local trusted_domains=$(load_config "TRUSTED_DOMAINS")
-    local primary_domain=$(load_config "PRIMARY_IP" "localhost")
-    local protocol=$(load_config "PROTOCOL" "http")
-    local php_memory=$(load_config "PHP_MEMORY_LIMIT")
-    local php_upload=$(load_config "PHP_UPLOAD_LIMIT")
-    local php_max_files=$(load_config "PHP_MAX_FILE_UPLOADS")
-    local nextcloud_memory=$(load_config "NEXTCLOUD_MEMORY_LIMIT")
-    local nextcloud_cpu=$(load_config "NEXTCLOUD_CPU_LIMIT")
-
-    # Generate storage volumes configuration
+    # Generate storage volumes configuration (only dynamic part remaining)
     local storage_volumes
     storage_volumes=$(generate_storage_volumes_config)
 
-    # Replace template variables
-    template_content=${template_content//__NEXTCLOUD_VERSION__/$nextcloud_version}
-    template_content=${template_content//__NEXTCLOUD_HTTP_PORT__/$nextcloud_port}
-    template_content=${template_content//__POSTGRES_DB__/$postgres_db}
-    template_content=${template_content//__POSTGRES_USER__/$postgres_user}
-    template_content=${template_content//__POSTGRES_PASSWORD__/$postgres_password}
-    template_content=${template_content//__REDIS_PASSWORD__/$redis_password}
-    template_content=${template_content//__ADMIN_USER__/$admin_user}
-    template_content=${template_content//__ADMIN_PASSWORD__/$admin_password}
-    template_content=${template_content//__TRUSTED_DOMAINS__/$trusted_domains}
-    template_content=${template_content//__PRIMARY_DOMAIN__/$primary_domain}
-    template_content=${template_content//__PROTOCOL__/$protocol}
-    template_content=${template_content//__PHP_MEMORY_LIMIT__/$php_memory}
-    template_content=${template_content//__PHP_UPLOAD_LIMIT__/$php_upload}
-    template_content=${template_content//__PHP_MAX_FILE_UPLOADS__/$php_max_files}
-    template_content=${template_content//__NEXTCLOUD_MEMORY_LIMIT__/$nextcloud_memory}
-    template_content=${template_content//__NEXTCLOUD_CPU_LIMIT__/$nextcloud_cpu}
+    # Replace only the storage volumes placeholder (everything else uses .env)
     template_content=${template_content//__STORAGE_VOLUMES__/$storage_volumes}
 
     # Write output file
     if echo "$template_content" > "$output_file"; then
         print_status "pass" "Docker Compose file created: $output_file"
+        print_status "info" "Configuration will be loaded from .env file"
         return 0
     else
         print_status "fail" "Failed to create Docker Compose file"
@@ -346,7 +472,7 @@ create_environment_file() {
 
     # Load all configuration values
     local config_vars=(
-        "NEXTCLOUD_HTTP_PORT" "NEXTCLOUD_HTTPS_PORT" "PRIMARY_DOMAIN" "PROTOCOL"
+        "HOST_IP" "NEXTCLOUD_HTTP_PORT" "NEXTCLOUD_HTTPS_PORT" "PRIMARY_DOMAIN" "PROTOCOL"
         "TRUSTED_DOMAINS" "POSTGRES_DB" "POSTGRES_USER" "POSTGRES_PASSWORD"
         "REDIS_PASSWORD" "NEXTCLOUD_VERSION" "ADMIN_USER" "ADMIN_PASSWORD"
         "PHP_MEMORY_LIMIT" "PHP_UPLOAD_LIMIT" "PHP_MAX_FILE_UPLOADS"
@@ -556,6 +682,9 @@ validate_deployment() {
         validation_passed=false
     fi
 
+    # Display static IP configuration
+    display_static_ip_info
+
     if [ "$validation_passed" = true ]; then
         print_status "pass" "Deployment validation successful"
         return 0
@@ -563,6 +692,32 @@ validate_deployment() {
         print_status "fail" "Deployment validation failed"
         return 1
     fi
+}
+
+# Function to display static IP information
+display_static_ip_info() {
+    print_subsection "Docker Network Configuration"
+
+    echo -e "${CYAN}Static IP Assignments:${NC}"
+    echo -e "  ${GREEN}Network:${NC} kekeli-network (172.20.0.0/16)"
+    echo -e "  ${GREEN}Gateway:${NC} 172.20.0.1"
+    echo ""
+    echo -e "  ${YELLOW}Container IP Addresses:${NC}"
+
+    # Get actual IPs from running containers
+    local db_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' kekeli-nextcloud-db 2>/dev/null || echo "172.20.0.2")
+    local redis_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' kekeli-nextcloud-redis 2>/dev/null || echo "172.20.0.3")
+    local app_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' kekeli-nextcloud-app 2>/dev/null || echo "172.20.0.4")
+
+    echo -e "    - Database (PostgreSQL): ${GREEN}$db_ip${NC}"
+    echo -e "    - Cache (Redis):         ${GREEN}$redis_ip${NC}"
+    echo -e "    - Nextcloud App:         ${GREEN}$app_ip${NC}"
+    echo ""
+    echo -e "${CYAN}Benefits:${NC}"
+    echo -e "  ✓ Predictable container IPs for troubleshooting"
+    echo -e "  ✓ Consistent network configuration across restarts"
+    echo -e "  ✓ Easier firewall and security rule management"
+    echo ""
 }
 
 # Function to show deployment summary

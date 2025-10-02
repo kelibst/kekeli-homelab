@@ -423,6 +423,80 @@ docker_compose_available() {
     docker compose version >/dev/null 2>&1 || command -v docker-compose >/dev/null 2>&1
 }
 
+# Function to check Kekeli container health status
+check_kekeli_containers_health() {
+    local containers=("kekeli-nextcloud-app" "kekeli-nextcloud-db" "kekeli-nextcloud-redis")
+    local running_count=0
+    local total_count=${#containers[@]}
+
+    for container in "${containers[@]}"; do
+        if docker ps --format "table {{.Names}}" | grep -q "^$container$" 2>/dev/null; then
+            running_count=$((running_count + 1))
+        fi
+    done
+
+    if [ $running_count -eq $total_count ]; then
+        echo "all_running"
+    elif [ $running_count -gt 0 ]; then
+        echo "partially_running"
+    else
+        echo "not_running"
+    fi
+}
+
+# Function to build access routes from configuration
+build_access_routes() {
+    local routes=()
+
+    # Load configuration
+    local host_ip=$(load_config "HOST_IP" "")
+    local primary_domain=$(load_config "PRIMARY_DOMAIN" "")
+    local nextcloud_port=$(load_config "NEXTCLOUD_HTTP_PORT" "8080")
+    local protocol=$(load_config "PROTOCOL" "http")
+
+    # Priority 1: HOST_IP (static IP) - always first if configured
+    if [[ -n "$host_ip" ]]; then
+        routes+=("$protocol://$host_ip:$nextcloud_port")
+    fi
+
+    # Priority 2: Primary configured domain (if different from HOST_IP)
+    if [[ -n "$primary_domain" && "$primary_domain" != "$host_ip" ]]; then
+        if [[ "$primary_domain" =~ :[0-9]+$ ]]; then
+            routes+=("$protocol://$primary_domain")
+        else
+            routes+=("$protocol://$primary_domain:$nextcloud_port")
+        fi
+    fi
+
+    # Priority 3: Other local IP routes
+    local local_ips=($(get_local_ips))
+    for ip in "${local_ips[@]}"; do
+        # Skip if this IP is already added as HOST_IP or primary_domain
+        if [[ "$ip" != "$host_ip" && "$ip" != "${primary_domain%:*}" ]]; then
+            routes+=("$protocol://$ip:$nextcloud_port")
+        fi
+    done
+
+    # Print unique routes (already prioritized, so no need to sort)
+    printf '%s\n' "${routes[@]}" | awk '!seen[$0]++'
+}
+
+# Function to get Docker status summary
+get_docker_status_summary() {
+    if ! docker_installed; then
+        echo "docker_not_installed"
+        return
+    fi
+
+    if ! docker_running; then
+        echo "docker_not_running"
+        return
+    fi
+
+    local container_health=$(check_kekeli_containers_health)
+    echo "$container_health"
+}
+
 # =============================================================================
 # PROGRESS AND SPINNER FUNCTIONS
 # =============================================================================

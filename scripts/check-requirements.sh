@@ -363,6 +363,12 @@ main() {
         echo -e "  1. Run: ./install.sh"
         echo -e "  2. Follow the interactive setup wizard"
         echo -e "  3. Access your Nextcloud via web browser"
+        echo ""
+        echo -e "${CYAN}Advanced features available:${NC}"
+        echo -e "  • Automatic IP change detection and configuration updates"
+        echo -e "  • Folder sharing via Docker mount points"
+        echo -e "  • Storage health monitoring and testing"
+        echo -e "  • Mobile device setup with auto-generated guides"
     else
         echo -e "${RED}❌ Requirements Check: FAILED${NC}"
         echo -e "${RED}Please resolve the issues above before installation.${NC}"

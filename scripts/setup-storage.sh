@@ -68,7 +68,10 @@ interactive_storage_setup() {
     echo -e "  ${GREEN}4.${NC} Skip storage setup (use Docker volumes)"
     echo ""
 
-    local choice=$(get_user_input "Select storage option (1-4)" "1")
+    # Use direct input to avoid formatting issues
+    echo -ne "  ${GREEN}Select storage option (1-4) [1]: ${NC}"
+    read -r choice
+    choice=${choice:-1}
 
     case $choice in
         1)
@@ -341,7 +344,10 @@ setup_local_directory_storage() {
     echo ""
     print_status "info" "Base directory: $base_dir"
 
-    local data_dir=$(get_user_input "Data directory path" "$default_data_dir")
+    # Use direct input to avoid formatting issues
+    echo -ne "  ${GREEN}Data directory path [$default_data_dir]: ${NC}"
+    read -r data_dir
+    data_dir=${data_dir:-$default_data_dir}
     print_status "info" "Selected data directory: $data_dir"
 
     # Validate path
@@ -454,13 +460,27 @@ setup_nextcloud_data_directory() {
     print_status "progress" "Setting up Nextcloud data directory: $data_dir"
     print_status "info" "Creating directory structure for Nextcloud data, config, and apps"
 
-    # Create directory structure
-    print_status "progress" "Creating main data directory..."
-    if ! create_directory "$data_dir" 755; then
-        handle_critical_error "Failed to create data directory: $data_dir"
-        return 1
+    # Check if directory already exists and is properly configured
+    if [ -d "$data_dir" ]; then
+        print_status "info" "Data directory already exists: $data_dir"
+
+        # Check if it's already owned by www-data (from previous installation)
+        local current_owner=$(stat -c "%U" "$data_dir" 2>/dev/null || echo "unknown")
+        if [ "$current_owner" = "www-data" ]; then
+            print_status "pass" "Directory already configured for Nextcloud (www-data ownership)"
+            return 0
+        else
+            print_status "info" "Directory exists but needs permission configuration"
+        fi
+    else
+        # Create directory structure
+        print_status "progress" "Creating main data directory..."
+        if ! create_directory "$data_dir" 755; then
+            handle_critical_error "Failed to create data directory: $data_dir"
+            return 1
+        fi
+        print_status "pass" "Main data directory created"
     fi
-    print_status "pass" "Main data directory created"
 
     # Create subdirectories
     print_status "progress" "Creating Nextcloud subdirectory structure..."
@@ -636,6 +656,318 @@ show_storage_summary() {
 }
 
 # =============================================================================
+# ADVANCED STORAGE MANAGEMENT
+# =============================================================================
+
+# Show detailed storage status and health information
+show_detailed_storage_status() {
+    print_section "Detailed Storage Status"
+
+    local storage_type=$(load_config "STORAGE_TYPE")
+    local storage_data_dir=$(load_config "STORAGE_DATA_DIR")
+
+    if [ -z "$storage_type" ]; then
+        print_status "error" "No storage configuration found"
+        return 1
+    fi
+
+    echo -e "${CYAN}=== Storage Configuration ===${NC}"
+    show_storage_summary
+
+    echo -e "\n${CYAN}=== Storage Health Check ===${NC}"
+
+    # Check if data directory exists and is accessible
+    if [ -d "$storage_data_dir" ]; then
+        local available_space=$(df -h "$storage_data_dir" | awk 'NR==2 {print $4}')
+        local used_space=$(df -h "$storage_data_dir" | awk 'NR==2 {print $3}')
+        local total_space=$(df -h "$storage_data_dir" | awk 'NR==2 {print $2}')
+        local usage_percent=$(df -h "$storage_data_dir" | awk 'NR==2 {print $5}')
+
+        print_status "pass" "Data directory accessible: $storage_data_dir"
+        echo -e "  Total Space: ${GREEN}$total_space${NC}"
+        echo -e "  Used Space: ${GREEN}$used_space${NC}"
+        echo -e "  Available: ${GREEN}$available_space${NC}"
+        echo -e "  Usage: ${GREEN}$usage_percent${NC}"
+
+        # Check directory permissions
+        if [ -w "$storage_data_dir" ]; then
+            print_status "pass" "Directory is writable"
+        else
+            print_status "fail" "Directory is not writable"
+        fi
+    else
+        print_status "fail" "Data directory not found: $storage_data_dir"
+    fi
+
+    # Check Docker mount points
+    echo -e "\n${CYAN}=== Docker Mount Status ===${NC}"
+    if command -v docker >/dev/null 2>&1; then
+        local nextcloud_container=$(docker ps -q -f name=nextcloud)
+        if [ -n "$nextcloud_container" ]; then
+            print_status "pass" "Nextcloud container running"
+            echo -e "${CYAN}Mount points:${NC}"
+            docker inspect "$nextcloud_container" | grep -A 10 '"Mounts"' | grep -E '"Source"|"Destination"' | while read line; do
+                echo "  $line"
+            done
+        else
+            print_status "warn" "Nextcloud container not running"
+        fi
+    else
+        print_status "error" "Docker not available"
+    fi
+
+    # Check for additional mounted folders
+    echo -e "\n${CYAN}=== Additional Mount Points ===${NC}"
+    local additional_mounts=$(load_config "ADDITIONAL_MOUNTS" 2>/dev/null || echo "")
+    if [ -n "$additional_mounts" ]; then
+        echo "$additional_mounts" | tr ',' '\n' | while read mount; do
+            if [ -n "$mount" ]; then
+                echo -e "  ${GREEN}$mount${NC}"
+            fi
+        done
+    else
+        echo -e "  ${YELLOW}No additional mount points configured${NC}"
+    fi
+}
+
+# Test storage functionality and performance
+test_storage_functionality() {
+    print_section "Storage Functionality Test"
+
+    local storage_data_dir=$(load_config "STORAGE_DATA_DIR")
+    local test_file="$storage_data_dir/storage_test_$(date +%s).tmp"
+    local test_passed=true
+
+    if [ -z "$storage_data_dir" ]; then
+        print_status "error" "No storage configuration found"
+        return 1
+    fi
+
+    if [ ! -d "$storage_data_dir" ]; then
+        print_status "error" "Storage directory not found: $storage_data_dir"
+        return 1
+    fi
+
+    print_status "progress" "Testing storage read/write capabilities..."
+
+    # Test write performance
+    echo -e "${CYAN}=== Write Test ===${NC}"
+    local start_time=$(date +%s%N)
+    if echo "Kekeli-HomeCloud storage test - $(date)" > "$test_file" 2>/dev/null; then
+        local end_time=$(date +%s%N)
+        local duration=$(( (end_time - start_time) / 1000000 ))
+        print_status "pass" "Write test successful (${duration}ms)"
+    else
+        print_status "fail" "Write test failed"
+        test_passed=false
+    fi
+
+    # Test read performance
+    if [ -f "$test_file" ]; then
+        echo -e "${CYAN}=== Read Test ===${NC}"
+        local start_time=$(date +%s%N)
+        if cat "$test_file" >/dev/null 2>&1; then
+            local end_time=$(date +%s%N)
+            local duration=$(( (end_time - start_time) / 1000000 ))
+            print_status "pass" "Read test successful (${duration}ms)"
+        else
+            print_status "fail" "Read test failed"
+            test_passed=false
+        fi
+
+        # Clean up test file
+        rm -f "$test_file" 2>/dev/null
+    fi
+
+    # Test Docker volume access (if containers are running)
+    echo -e "${CYAN}=== Docker Volume Access Test ===${NC}"
+    if command -v docker >/dev/null 2>&1; then
+        local nextcloud_container=$(docker ps -q -f name=nextcloud)
+        if [ -n "$nextcloud_container" ]; then
+            local docker_test_file="/var/www/html/data/storage_test_$(date +%s).tmp"
+            if docker exec "$nextcloud_container" touch "$docker_test_file" 2>/dev/null; then
+                print_status "pass" "Docker volume write access successful"
+                docker exec "$nextcloud_container" rm -f "$docker_test_file" 2>/dev/null
+            else
+                print_status "fail" "Docker volume write access failed"
+                test_passed=false
+            fi
+        else
+            print_status "warn" "Nextcloud container not running - skipping Docker test"
+        fi
+    else
+        print_status "warn" "Docker not available - skipping Docker test"
+    fi
+
+    # Overall test result
+    echo -e "\n${CYAN}=== Test Summary ===${NC}"
+    if [ "$test_passed" = true ]; then
+        print_status "pass" "All storage functionality tests passed"
+        return 0
+    else
+        print_status "fail" "Some storage functionality tests failed"
+        return 1
+    fi
+}
+
+# Add additional folder mount points for sharing
+add_folder_mount_points() {
+    print_section "Add Folder Mount Points"
+
+    local storage_data_dir=$(load_config "STORAGE_DATA_DIR")
+
+    if [ -z "$storage_data_dir" ]; then
+        print_status "error" "No storage configuration found. Please run storage setup first."
+        return 1
+    fi
+
+    print_status "info" "This feature allows you to share additional folders with Nextcloud"
+    echo -e "${CYAN}Current storage directory: ${GREEN}$storage_data_dir${NC}"
+
+    # Get current additional mounts
+    local current_mounts=$(load_config "ADDITIONAL_MOUNTS" 2>/dev/null || echo "")
+    if [ -n "$current_mounts" ]; then
+        echo -e "\n${CYAN}Currently configured additional mounts:${NC}"
+        echo "$current_mounts" | tr ',' '\n' | while read mount; do
+            if [ -n "$mount" ]; then
+                echo -e "  ${GREEN}$mount${NC}"
+            fi
+        done
+    fi
+
+    echo -e "\n${CYAN}Adding new folder mount point:${NC}"
+
+    # Get source folder from user
+    local source_folder=""
+    while [ -z "$source_folder" ]; do
+        echo -n "Enter the full path to the folder you want to share: "
+        read -r source_folder
+
+        if [ ! -d "$source_folder" ]; then
+            print_status "error" "Directory does not exist: $source_folder"
+            echo -n "Create this directory? (y/n): "
+            read -r create_dir
+            if [ "$create_dir" = "y" ] || [ "$create_dir" = "Y" ]; then
+                if mkdir -p "$source_folder" 2>/dev/null; then
+                    print_status "pass" "Directory created: $source_folder"
+                else
+                    print_status "error" "Failed to create directory: $source_folder"
+                    source_folder=""
+                    continue
+                fi
+            else
+                source_folder=""
+                continue
+            fi
+        fi
+
+        if [ ! -r "$source_folder" ]; then
+            print_status "error" "Directory is not readable: $source_folder"
+            source_folder=""
+            continue
+        fi
+    done
+
+    # Get target name for the mount
+    local target_name=""
+    while [ -z "$target_name" ]; do
+        local default_name=$(basename "$source_folder")
+        echo -n "Enter name for this folder in Nextcloud [$default_name]: "
+        read -r target_name
+
+        if [ -z "$target_name" ]; then
+            target_name="$default_name"
+        fi
+
+        # Check if target already exists
+        if [ -d "$storage_data_dir/$target_name" ]; then
+            print_status "warn" "Target folder already exists: $target_name"
+            echo -n "Use a different name? (y/n): "
+            read -r use_different
+            if [ "$use_different" = "y" ] || [ "$use_different" = "Y" ]; then
+                target_name=""
+                continue
+            fi
+        fi
+    done
+
+    # Create the mount point configuration
+    local mount_config="$source_folder:$storage_data_dir/$target_name"
+
+    # Update additional mounts configuration
+    if [ -n "$current_mounts" ]; then
+        save_config "ADDITIONAL_MOUNTS" "$current_mounts,$mount_config"
+    else
+        save_config "ADDITIONAL_MOUNTS" "$mount_config"
+    fi
+
+    # Create bind mount or symlink
+    echo -n "Use bind mount (recommended) or symbolic link? (b/s) [b]: "
+    read -r mount_type
+    if [ "$mount_type" = "s" ] || [ "$mount_type" = "S" ]; then
+        # Create symbolic link
+        if ln -sf "$source_folder" "$storage_data_dir/$target_name" 2>/dev/null; then
+            print_status "pass" "Symbolic link created: $storage_data_dir/$target_name -> $source_folder"
+        else
+            print_status "error" "Failed to create symbolic link"
+            return 1
+        fi
+    else
+        # Create bind mount
+        if mkdir -p "$storage_data_dir/$target_name" 2>/dev/null; then
+            if mount --bind "$source_folder" "$storage_data_dir/$target_name" 2>/dev/null; then
+                print_status "pass" "Bind mount created: $source_folder -> $storage_data_dir/$target_name"
+
+                # Add to fstab for persistence
+                local fstab_entry="$source_folder $storage_data_dir/$target_name none bind 0 0"
+                if ! grep -q "$fstab_entry" /etc/fstab 2>/dev/null; then
+                    echo -n "Add to /etc/fstab for persistence? (y/n) [y]: "
+                    read -r add_fstab
+                    if [ "$add_fstab" != "n" ] && [ "$add_fstab" != "N" ]; then
+                        if echo "$fstab_entry" | sudo tee -a /etc/fstab >/dev/null 2>&1; then
+                            print_status "pass" "Added to /etc/fstab for automatic mounting"
+                        else
+                            print_status "warn" "Failed to add to /etc/fstab - mount will not persist after reboot"
+                        fi
+                    fi
+                fi
+            else
+                print_status "error" "Failed to create bind mount"
+                rmdir "$storage_data_dir/$target_name" 2>/dev/null
+                return 1
+            fi
+        else
+            print_status "error" "Failed to create target directory: $storage_data_dir/$target_name"
+            return 1
+        fi
+    fi
+
+    # Update Docker compose if containers are running
+    echo -n "Restart Nextcloud containers to apply changes? (y/n) [y]: "
+    read -r restart_containers
+    if [ "$restart_containers" != "n" ] && [ "$restart_containers" != "N" ]; then
+        if command -v docker-compose >/dev/null 2>&1; then
+            local compose_file="$PROJECT_ROOT/docker-compose.yml"
+            if [ -f "$compose_file" ]; then
+                print_status "progress" "Restarting containers..."
+                if (cd "$PROJECT_ROOT" && docker-compose restart nextcloud 2>/dev/null); then
+                    print_status "pass" "Containers restarted successfully"
+                else
+                    print_status "warn" "Failed to restart containers - you may need to restart manually"
+                fi
+            fi
+        fi
+    fi
+
+    echo -e "\n${CYAN}=== Mount Point Added Successfully ===${NC}"
+    echo -e "Source: ${GREEN}$source_folder${NC}"
+    echo -e "Target: ${GREEN}$storage_data_dir/$target_name${NC}"
+    echo -e "Access: ${GREEN}Available in Nextcloud as '$target_name'${NC}"
+
+    print_status "pass" "Folder mount point added successfully!"
+}
+
+# =============================================================================
 # COMMAND LINE INTERFACE
 # =============================================================================
 
@@ -652,6 +984,10 @@ show_help() {
     echo "  -d, --docker      Use Docker volume storage"
     echo "  -m, --manual      Manual storage device selection"
     echo "  -s, --summary     Show current storage configuration"
+    echo "  --status          Show detailed storage status"
+    echo "  --test            Test storage access and functionality"
+    echo "  --add-mount       Add additional folder mount points for sharing"
+    echo "  --setup           Interactive storage setup"
     echo "  -v, --validate    Validate existing storage setup"
     echo ""
     echo "Examples:"
@@ -671,6 +1007,10 @@ main() {
     local manual_mode=false
     local summary_mode=false
     local validate_mode=false
+    local status_mode=false
+    local test_mode=false
+    local add_mount_mode=false
+    local setup_mode=false
 
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
@@ -701,6 +1041,22 @@ main() {
                 ;;
             -v|--validate)
                 validate_mode=true
+                shift
+                ;;
+            --status)
+                status_mode=true
+                shift
+                ;;
+            --test)
+                test_mode=true
+                shift
+                ;;
+            --add-mount)
+                add_mount_mode=true
+                shift
+                ;;
+            --setup)
+                setup_mode=true
                 shift
                 ;;
             *)
@@ -736,6 +1092,26 @@ main() {
             print_status "error" "No storage configuration found to validate"
             exit 1
         fi
+    fi
+
+    if [ "$status_mode" = true ]; then
+        show_detailed_storage_status
+        exit 0
+    fi
+
+    if [ "$test_mode" = true ]; then
+        test_storage_functionality
+        exit 0
+    fi
+
+    if [ "$add_mount_mode" = true ]; then
+        add_folder_mount_points
+        exit 0
+    fi
+
+    if [ "$setup_mode" = true ]; then
+        interactive_storage_setup
+        exit 0
     fi
 
     # Execute storage setup based on mode

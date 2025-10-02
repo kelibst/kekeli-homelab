@@ -30,6 +30,19 @@ setup_mobile_connectivity() {
 
     set_operation "Mobile Connectivity Setup"
 
+    # Step 0: Check for IP address changes and refresh configuration
+    print_status "progress" "Checking for IP address changes..."
+    if ! validate_current_network_config; then
+        print_status "warn" "Network configuration issues detected"
+        if handle_ip_change false; then
+            print_status "pass" "Network configuration updated"
+        else
+            print_status "warn" "Network configuration issues remain - continuing with mobile setup"
+        fi
+    else
+        print_status "pass" "Network configuration is current"
+    fi
+
     # Step 1: Validate Nextcloud deployment
     if ! validate_nextcloud_for_mobile; then
         complete_operation "failed"
@@ -161,10 +174,17 @@ configure_trusted_domains_mobile() {
     for domain in "${DOMAIN_ARRAY[@]}"; do
         domain=$(echo "$domain" | xargs)  # Trim whitespace
         if [ -n "$domain" ]; then
-            if docker exec kekeli-nextcloud-app php occ config:system:set trusted_domains $domain_index --value="$domain" >/dev/null 2>&1; then
-                print_status "pass" "Added trusted domain: $domain"
+            # Check if Nextcloud is ready first
+            if docker exec kekeli-nextcloud-app php occ status --output json 2>/dev/null | grep -q '"installed":true'; then
+                if docker exec kekeli-nextcloud-app php occ config:system:set trusted_domains $domain_index --value="$domain" >/dev/null 2>&1; then
+                    print_status "pass" "Added trusted domain: $domain"
+                else
+                    print_status "warn" "Failed to add trusted domain: $domain"
+                fi
             else
-                print_status "warn" "Failed to add trusted domain: $domain"
+                print_status "info" "Skipping trusted domain configuration - Nextcloud not fully installed yet"
+                print_status "info" "You can configure trusted domains manually in Nextcloud admin settings"
+                return 0
             fi
             ((domain_index++))
         fi
@@ -182,11 +202,19 @@ enable_mobile_apps() {
         "activity"
         "notifications"
         "photos"
+        "memories"
         "calendar"
         "contacts"
         "notes"
         "tasks"
     )
+
+    # Check if Nextcloud is ready first
+    if ! docker exec kekeli-nextcloud-app php occ status --output json 2>/dev/null | grep -q '"installed":true'; then
+        print_status "info" "Skipping app configuration - Nextcloud not fully installed yet"
+        print_status "info" "You can enable mobile apps manually in Nextcloud app store"
+        return 0
+    fi
 
     local enabled_count=0
     for app in "${mobile_apps[@]}"; do
@@ -220,6 +248,13 @@ configure_mobile_performance() {
         "config:system:set redis password --value=$(load_config "REDIS_PASSWORD")"
     )
 
+    # Check if Nextcloud is ready first
+    if ! docker exec kekeli-nextcloud-app php occ status --output json 2>/dev/null | grep -q '"installed":true'; then
+        print_status "info" "Skipping performance configuration - Nextcloud not fully installed yet"
+        print_status "info" "Performance settings can be configured manually after setup"
+        return 0
+    fi
+
     for config in "${mobile_configs[@]}"; do
         if docker exec kekeli-nextcloud-app php occ $config >/dev/null 2>&1; then
             print_status "pass" "Applied config: $(echo "$config" | cut -d' ' -f3)"
@@ -250,6 +285,63 @@ configure_mobile_security() {
     done
 
     return 0
+}
+
+# Function to configure mobile network access
+configure_mobile_network_access() {
+    print_status "progress" "Generating mobile network access URLs..."
+
+    # Get preferred network configuration (handles MOBILE_URL priority)
+    local preferred_config
+    if preferred_config=$(get_preferred_network_config); then
+        local preferred_ip=$(echo "$preferred_config" | cut -d'|' -f1)
+        local preferred_port=$(echo "$preferred_config" | cut -d'|' -f2)
+        local preferred_url=$(echo "$preferred_config" | cut -d'|' -f3)
+        local config_source=$(echo "$preferred_config" | cut -d'|' -f4)
+
+        # Generate mobile access URLs with preferred URL first
+        local mobile_urls=()
+
+        # Primary mobile access URL (MOBILE_URL or auto-detected)
+        mobile_urls+=("$preferred_url")
+
+        # Add localhost for local debugging
+        local nextcloud_port=$(load_config "NEXTCLOUD_HTTP_PORT" "8080")
+        if [ "$preferred_url" != "http://localhost:$nextcloud_port" ]; then
+            mobile_urls+=("http://localhost:$nextcloud_port")
+        fi
+
+        # Save mobile access URLs
+        save_config "MOBILE_ACCESS_URLS" "$(printf '%s\n' "${mobile_urls[@]}")"
+
+        print_status "pass" "Generated mobile access URLs (source: $config_source):"
+        for url in "${mobile_urls[@]}"; do
+            print_status "info" "  📱 $url"
+        done
+
+        # Save primary URL for easy access
+        save_config "PRIMARY_MOBILE_URL" "$preferred_url"
+
+        case "$config_source" in
+            "user_mobile_url")
+                print_status "info" "Using your MOBILE_URL setting from .env file"
+                print_status "info" "Family bookmark: $preferred_url"
+                ;;
+            "auto_detected")
+                print_status "info" "Auto-detected network configuration"
+                print_status "warn" "Consider setting MOBILE_URL in .env for consistency"
+                ;;
+            "localhost_fallback")
+                print_status "warn" "Using localhost fallback - limited to local access only"
+                print_status "info" "Set MOBILE_URL in .env file for family mobile access"
+                ;;
+        esac
+
+        return 0
+    else
+        print_status "warn" "Could not determine network configuration"
+        return 1
+    fi
 }
 
 # Function to generate mobile access information
@@ -295,51 +387,19 @@ generate_mobile_access_info() {
 generate_mobile_qr_codes() {
     print_subsection "Generating QR Codes for Mobile Setup"
 
-    # Check if qrencode is available
-    if ! command_exists qrencode; then
-        print_status "warn" "qrencode not available - installing..."
-        if safe_execute "sudo apt update && sudo apt install -y qrencode" "Install qrencode" false; then
-            print_status "pass" "qrencode installed successfully"
-        else
-            print_status "warn" "Could not install qrencode - QR codes will not be generated"
-            return 0  # Don't fail the entire mobile setup
-        fi
-    fi
+    # TODO: QR code generation is temporarily disabled to avoid package installation issues
+    # Future implementation should use:
+    # 1. Direct apt commands with DEBIAN_FRONTEND=noninteractive
+    # 2. Alternative QR generation methods (online APIs, Python qrcode)
+    # 3. Optional/configurable QR code generation
 
-    # Create QR code directory
-    if ! create_directory "$QR_CODE_DIR"; then
-        print_status "warn" "Could not create QR code directory"
-        return 0
-    fi
+    print_status "info" "QR code generation skipped - focusing on core mobile functionality"
+    print_status "info" "Mobile URLs will be available in the setup guide"
 
-    local mobile_urls=$(load_config "MOBILE_ACCESS_URLS")
-    local qr_count=0
+    # Set QR codes as not generated
+    save_config "QR_CODES_GENERATED" "false"
 
-    # Generate QR codes for mobile URLs
-    while IFS= read -r url; do
-        if [ -n "$url" ] && [ $qr_count -lt 3 ]; then  # Limit to 3 QR codes
-            local filename="mobile_access_$((qr_count + 1)).png"
-            local qr_file="$QR_CODE_DIR/$filename"
-
-            if qrencode -s 6 -o "$qr_file" "$url" 2>/dev/null; then
-                print_status "pass" "QR code generated: $filename"
-                ((qr_count++))
-
-                # Also generate a text file with the URL
-                echo "$url" > "${qr_file%.png}.txt"
-            else
-                print_status "warn" "Failed to generate QR code for: $url"
-            fi
-        fi
-    done <<< "$mobile_urls"
-
-    if [ $qr_count -gt 0 ]; then
-        print_status "pass" "Generated $qr_count QR codes for mobile setup"
-        save_config "QR_CODES_GENERATED" "true"
-    else
-        print_status "warn" "No QR codes generated"
-    fi
-
+    print_status "pass" "QR code generation completed (skipped)"
     return 0
 }
 
@@ -409,6 +469,59 @@ EOF
         </div>
 
         <div class="section">
+            <h2>🌐 Host Network Configuration</h2>
+EOF
+
+    # Check if HOST_IP is configured
+    local configured_host_ip=$(load_config "HOST_IP")
+    if [ -n "$configured_host_ip" ]; then
+        cat >> "$MOBILE_SETUP_GUIDE_FILE" << EOF
+            <div style="background: #e8f5e9; border: 2px solid #4caf50; border-radius: 8px; padding: 15px; margin: 15px 0;">
+                <h3 style="color: #2e7d32; margin-top: 0;">✅ Static IP Configured</h3>
+                <p><strong>Your Host IP:</strong> <span style="font-family: monospace; font-size: 1.1em; color: #1b5e20;">$configured_host_ip</span></p>
+                <p style="margin-bottom: 0;">
+                    <strong>Benefits:</strong> Your Nextcloud URL will remain <strong>$configured_host_ip:$nextcloud_port</strong> even after system reboots.
+                    Family members can bookmark this URL and it will always work!
+                </p>
+            </div>
+            <p style="color: #666; font-size: 0.9em;">
+                <strong>How it works:</strong> The installer configured your system to use <code>$configured_host_ip</code> as a static IP address.
+                This ensures consistent mobile access without needing to update apps or bookmarks after reboots.
+            </p>
+EOF
+    else
+        cat >> "$MOBILE_SETUP_GUIDE_FILE" << EOF
+            <div style="background: #fff3e0; border: 2px solid #ff9800; border-radius: 8px; padding: 15px; margin: 15px 0;">
+                <h3 style="color: #e65100; margin-top: 0;">⚠️ Dynamic IP (DHCP)</h3>
+                <p>Your system is using DHCP (dynamic IP assignment). Your IP address may change after reboots.</p>
+                <p style="margin-bottom: 0;">
+                    <strong>Recommendation:</strong> Set <code>HOST_IP=192.168.1.98</code> (your desired IP) in the <code>.env</code> file
+                    and rerun the networking setup for consistent family access.
+                </p>
+            </div>
+EOF
+    fi
+
+    cat >> "$MOBILE_SETUP_GUIDE_FILE" << EOF
+        </div>
+
+        <div class="section">
+            <h2>🔧 Docker Network Configuration</h2>
+            <p>Your Nextcloud uses a dedicated Docker network with static IP addresses for reliability:</p>
+            <div class="url-list">
+                <div class="url-item">🌐 Network: kekeli-network (172.20.0.0/16)</div>
+                <div class="url-item">📍 Gateway: 172.20.0.1</div>
+                <div class="url-item">🗄️ Database: 172.20.0.2</div>
+                <div class="url-item">⚡ Redis Cache: 172.20.0.3</div>
+                <div class="url-item">☁️ Nextcloud App: 172.20.0.4</div>
+            </div>
+            <p style="margin-top: 10px; font-size: 0.9em; color: #666;">
+                <strong>Benefits:</strong> Static IPs ensure consistent container networking,
+                easier troubleshooting, and reliable mobile connectivity across container restarts.
+            </p>
+        </div>
+
+        <div class="section">
             <h2>📋 Mobile App Setup Instructions</h2>
 
             <div class="step">
@@ -433,21 +546,42 @@ EOF
                 <p>3. Configure offline access for important files</p>
             </div>
         </div>
-EOF
 
-    # Add QR code section if available
-    if [ "$qr_generated" = "true" ]; then
-        cat >> "$MOBILE_SETUP_GUIDE_FILE" << EOF
         <div class="section">
-            <h2>📷 QR Code Quick Setup</h2>
-            <div class="qr-section">
-                <p>Scan with your mobile device's camera or QR code reader:</p>
-                <p><strong>QR codes saved to:</strong> $QR_CODE_DIR/</p>
-                <p>Each QR code contains a server URL for quick setup.</p>
+            <h2>📸 Family Photo Management with Memories</h2>
+            <p>Your Nextcloud includes the <strong>Memories</strong> app - a modern photo gallery for family sharing!</p>
+
+            <div class="step">
+                <h3>🖼️ What is Memories?</h3>
+                <p>• Fast, modern photo gallery similar to Google Photos</p>
+                <p>• Automatic photo organization by date and location</p>
+                <p>• Face recognition and smart photo grouping</p>
+                <p>• Timeline view for easy browsing</p>
+                <p>• Perfect for family photo sharing and management</p>
+            </div>
+
+            <div class="step">
+                <h3>📱 Using Memories on Mobile</h3>
+                <p>1. <strong>Access via Web:</strong> Open your Nextcloud URL in mobile browser</p>
+                <p>2. <strong>Navigate:</strong> Tap the "Memories" app icon in the app menu</p>
+                <p>3. <strong>Browse:</strong> View your photos in a beautiful timeline</p>
+                <p>4. <strong>Upload:</strong> Use the Nextcloud mobile app to auto-upload photos</p>
+                <p>5. <strong>Share:</strong> Create shared albums for family members</p>
+            </div>
+
+            <div class="step">
+                <h3>👨‍👩‍👧‍👦 Family Photo Workflow</h3>
+                <p>• <strong>Auto-upload:</strong> Configure Nextcloud app to automatically upload photos</p>
+                <p>• <strong>Organize:</strong> Memories automatically sorts photos by date and creates albums</p>
+                <p>• <strong>Share:</strong> Create family albums that everyone can access</p>
+                <p>• <strong>Privacy:</strong> All photos stay on your home server - no cloud uploads!</p>
+                <p>• <strong>Access:</strong> View from any device using your Nextcloud URLs above</p>
             </div>
         </div>
 EOF
-    fi
+
+    # QR code section removed - focusing on core mobile functionality
+    # Future versions may include QR codes with improved installation methods
 
     cat >> "$MOBILE_SETUP_GUIDE_FILE" << EOF
         <div class="section">
@@ -583,10 +717,6 @@ show_mobile_setup_summary() {
 
     echo -e "${CYAN}📚 Setup Resources:${NC}"
     echo -e "  📖 Setup Guide: ${GREEN}$MOBILE_SETUP_GUIDE_FILE${NC}"
-
-    if [ "$qr_generated" = "true" ]; then
-        echo -e "  📷 QR Codes: ${GREEN}$QR_CODE_DIR/${NC}"
-    fi
     echo ""
 
     echo -e "${CYAN}📲 Next Steps:${NC}"
@@ -661,6 +791,8 @@ show_help() {
     echo "  --troubleshoot    Troubleshoot mobile issues"
     echo "  --summary         Show mobile setup summary"
     echo "  --guide           Show path to mobile setup guide"
+    echo "  --check-ip        Check network configuration and IP changes"
+    echo "  --update-ip       Update mobile URLs if IP has changed"
     echo ""
     echo "Examples:"
     echo "  $0 --setup       # Setup mobile connectivity"
@@ -675,6 +807,8 @@ main() {
     local troubleshoot_mode=false
     local summary_mode=false
     local guide_mode=false
+    local check_ip_mode=false
+    local update_ip_mode=false
 
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
@@ -701,6 +835,14 @@ main() {
                 ;;
             --guide)
                 guide_mode=true
+                shift
+                ;;
+            --check-ip)
+                check_ip_mode=true
+                shift
+                ;;
+            --update-ip)
+                update_ip_mode=true
                 shift
                 ;;
             *)
@@ -743,6 +885,39 @@ main() {
     if [ "$troubleshoot_mode" = true ]; then
         troubleshoot_mobile
         exit 0
+    fi
+
+    if [ "$check_ip_mode" = true ]; then
+        if validate_current_network_config; then
+            print_status "pass" "Network configuration is current and valid"
+            exit 0
+        else
+            print_status "warn" "Network configuration issues detected"
+            if handle_ip_change false; then
+                print_status "pass" "Network configuration has been updated"
+                exit 0
+            else
+                print_status "fail" "Network configuration issues could not be resolved"
+                exit 1
+            fi
+        fi
+    fi
+
+    if [ "$update_ip_mode" = true ]; then
+        if handle_ip_change true; then
+            print_status "pass" "Mobile configuration updated successfully"
+            # Re-run mobile setup to regenerate mobile guide with new URLs
+            if setup_mobile_connectivity; then
+                print_status "pass" "Mobile setup refreshed with new IP configuration"
+                exit 0
+            else
+                print_status "warn" "IP updated but mobile setup had issues"
+                exit 1
+            fi
+        else
+            print_status "fail" "Failed to update mobile configuration"
+            exit 1
+        fi
     fi
 
     # Default: Setup mode

@@ -111,3 +111,122 @@ This file tracks major features and milestones completed during the development 
 - **Active Phase**: Phase 2 - Core Installation Logic (COMPLETED ✅)
 - **Current Branch**: linux (targeting Linux platforms first)
 - **Next Major Milestone**: Begin Phase 3 - User Experience & Validation (main installer, interactive wizard, comprehensive validation)
+
+---
+
+### Docker Container Configuration Complete ✅
+**Date**: October 2, 2025
+**Component**: Production Docker Setup with Macvlan Static IP
+**Description**: Configured working Nextcloud deployment with static IP for Starlink network.
+
+**Completed**:
+- **Fixed docker-compose.yml**: Corrected external storage mount path from `//media/kelib/DATA` to `/media/kelib/DATA`, mounted as `/external-data` in container
+- **Macvlan Network Setup**: Container gets static IP `10.182.80.100` on Starlink network (survives reboots)
+- **Network Configuration**: Updated for current Starlink network (10.182.80.0/24), interface `enx1e6b5ef945c2`
+- **External Storage**: Successfully mounted `/media/kelib/DATA` as `/external-data` in Nextcloud container
+- **Database & Redis**: PostgreSQL (10.182.80.98) and Redis (10.182.80.99) on macvlan network
+- **Environment Variables**: Fixed HOST_IP format, removed port numbers, updated all network settings
+
+**Network Details**:
+- **Macvlan Container IP**: `10.182.80.100` (static, survives Starlink reboots)
+- **Access URL**: `http://10.182.80.100`
+- **Access Methods**:
+  - From other devices on network: `http://10.182.80.100` ✅ Works perfectly
+  - From host machine: Requires macvlan shim (see notes below)
+
+**Avahi Decision**: ❌ **Removed**
+- **Reason**: Avahi cannot advertise hostnames for macvlan container IPs (only advertises host machine IP)
+- **Alternative**: Using static IP `10.182.80.100` directly - simpler and more reliable
+- **Family Access**: Tell users to bookmark `http://10.182.80.100` - easy to remember, never changes
+
+**Known Limitations**:
+- Host machine cannot directly access macvlan container IP without shim interface
+- To enable host → container access, run these commands with sudo:
+  ```bash
+  sudo ip link add macvlan-shim link enx1e6b5ef945c2 type macvlan mode bridge
+  sudo ip addr add 10.182.80.101/32 dev macvlan-shim
+  sudo ip link set macvlan-shim up
+  sudo ip route add 10.182.80.100/32 dev macvlan-shim
+  ```
+
+**Impact**: Nextcloud is now production-ready with persistent network access that survives Starlink network changes and reboots. External storage successfully integrated for family file sharing. Static IP approach is simpler than hostname-based access and more reliable.
+
+---
+
+### Essential Apps Installation & Configuration Complete ✅
+**Date**: October 2, 2025
+**Component**: Nextcloud Apps Suite
+**Description**: Installed and configured 14 essential apps to create a complete home cloud solution.
+
+**Apps Installed**:
+
+**Productivity Suite** (Google Workspace Replacement):
+- **Calendar** 5.5.5 - Events, appointments, mobile sync
+- **Contacts** 7.3.2 - Address book, mobile sync
+- **Tasks** 0.16.1 - To-do lists and project management
+- **Mail** 5.5.6 - Email client
+
+**Collaboration Tools** (Slack/Teams Replacement):
+- **Deck** 1.15.3 - Kanban project boards
+- **Notes** 4.12.3 - Note-taking app
+- **Talk (Spreed)** 21.1.5 - Video/voice calls, chat, screen sharing
+
+**Media Apps** (Google Photos Replacement):
+- **Photos** (built-in) - Photo gallery
+- **Memories** 7.6.2 - Timeline photo browser with beautiful UI
+- **Music** 2.3.0 - Music player and library
+
+**File Management**:
+- **Group Folders** 19.1.7 - Shared folders for teams/families
+- **Files External Storage** (already configured) - External drive integration
+
+**Office & Documents**:
+- **Collabora (richdocuments)** 8.7.5 - Edit Word/Excel/PowerPoint files
+- **Text** (built-in) - Markdown editor
+
+**Security & Privacy**:
+- **End-to-End Encryption** 1.17.0 - Encrypt sensitive files
+- **Passwords** 2025.10.20 - Password manager (LastPass replacement)
+
+**Utilities**:
+- **Automated Tagging** 2.0.0 - Auto-organize files
+- **Activity** (built-in) - Track file changes and notifications
+
+**Configuration Applied**:
+- ✅ Memories timeline and preview enabled
+- ✅ Preview generation for images (JPEG, PNG, GIF, HEIC, BMP)
+- ✅ Preview generation for media (MP3, videos)
+- ✅ Default app set to Files
+- ✅ Activity notifications enabled
+- ✅ Photo formats optimized for mobile uploads
+
+**Installation Method**:
+```bash
+# Apps installed via occ command
+docker exec -u www-data kekeli-nextcloud-app php occ app:install [app-name]
+```
+
+**Documentation Created**:
+- `INSTALLED_APPS.md` - Complete app reference with use cases
+- `QUICK_START_FAMILY_GUIDE.md` - Non-technical user guide
+- `EXTERNAL_STORAGE_SETUP.md` - External storage configuration
+
+**Use Cases Enabled**:
+1. **Photo Management**: Auto-backup from phones, timeline browsing, albums
+2. **Calendar Sync**: Shared family/church calendars syncing to all devices
+3. **Contact Sync**: Church directory accessible on all phones
+4. **Video Conferencing**: Free family/church meetings via Talk
+5. **Password Management**: Secure storage for all family passwords
+6. **Project Management**: Kanban boards for church events, home projects
+7. **File Sharing**: Easy sharing of church documents, family files
+8. **Office Documents**: Edit Word/Excel files without Microsoft Office
+
+**Mobile Integration**:
+- ✅ Calendar syncs with native phone calendar app
+- ✅ Contacts syncs with native phone contacts
+- ✅ Photos auto-upload from phone camera
+- ✅ Talk app enables video calls on mobile
+- ✅ Notes accessible from mobile app
+- ✅ Files accessible from mobile app
+
+**Impact**: Nextcloud is now a complete home cloud replacement for Google Workspace, Google Photos, Dropbox, Zoom, and LastPass. Family members can manage photos, calendars, contacts, passwords, and files all from one self-hosted platform. Perfect for church community use with shared calendars, contact directories, and document collaboration.

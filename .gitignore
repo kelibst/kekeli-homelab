@@ -30,5 +30,17 @@ dist/
 *~
 local_settings.py
 
+# Environment files and secrets
 .env
+.env.local
+.env.production
+*.pem
+*.key
+*.crt
+
+# Nextcloud data and configuration
 nextcloud-data/*
+.kekeli-homecloud/
+
+# Docker secrets
+docker-compose.override.yml
